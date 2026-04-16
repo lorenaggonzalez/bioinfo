@@ -1,0 +1,121 @@
+---
+title: "guion_practica_10"
+format: html
+  html: 
+    embed-resources: true
+engine: knitr
+
+---
+
+# Revisión de los datos
+## Ejercicio 1
+¿Cuántas secuencias contiene el archivo?
+```{bash}
+zgrep -c "^>" At4.10.fa.gz
+```
+Al igual que con ls y zless, tambien existe zgrep para archivos comprimidos
+
+¿Qué longitudes mínima, media y máxima tienen las secuencias?
+```{bash}
+zcat At4.10.fa.gz | awk '
+/^>/ {
+    if (seqlen) print seqlen
+    seqlen=0
+    next
+}
+{
+    seqlen += length($0)
+}
+END {
+    print seqlen
+}' > longitudes.txt
+
+```
+
+```{bash}
+awk '{sum+=$1; if(min=="" || $1<min) min=$1; if($1>max) max=$1} END {print "Min:",min,"Media:",sum/NR,"Max:",max}' longitudes.txt
+
+```
+Vuelca el contenido output de un archivo. La barra vertical redirige el contenido del archivo al programa awk. awk es un lenguaje que sirve para manipular correintes de texto, y normalmente trabaja con una serie de patrones.
+Primero se le dan ordenes para leer todas esas lineas que se le estan pasando y asi deifne unas variables.
+Todo lo que esta entre las llaves se ejecuta para cada una de las lineas del archivo FASTA
+
+n++ esta contando las secuencias, es decir, solo esta contando las lineas que comienzan con ese > en un archivo FASTA
+
+Con longitudes txt, le dices que ese es el archivo de donde tiene que sacar las lineas
+
+¿Cuál es el número total de bases?
+```{bash}
+zcat At4.10.fa.gz | grep -v "^>" | tr -d '\n' | wc -c
+
+```
+
+
+Resultados finales:
+Min: 2942 Media: 18143,6 Max: 59075
+Total bases:250599484
+
+
+Si se estimara que el genoma a ensamblar fuera de sólo 19 millones de bases, ¿cuál sería la cobertura esperada?
+
+El problema de la cobertura es que suele tener una distribucion muy dispersa, y no extraña nada que por casualidad haya sitios que no hayan sido secuenciados. Para un ensamblaje deberia ser algo mas elevada, que sea por lo menos algo mayor a 30.
+Para un genoma eucariota diploide, para diferenciar el haplotipo paterno del materno, con 13 muy probablemente solo estariamos leyendo uno de los dos cromosomas.
+
+250599484/19000000= 13,18
+
+# Ensamblaje
+```{bash}
+export PATH=$PATH:~/bin/hifiasm
+#| cache: true
+if [ ! -d asm1 ]; then mkdir asm1; fi
+if [ ! -e asm1/At4.bp.p_ctg.gfa ]; then
+   hifiasm -o asm1/At4 -t 2 -f 0 ../../data/At4.10.fa.gz 2> asm1/hifiasm.log
+fi
+```
+
+## Ejercicio 2
+
+Consulta la ayuda de hifiasm (hifiasm -h) y contesta las preguntas siguientes:
+
+¿Los parámetros corresponden al ensamblaje de un genoma haploide o diploide?
+
+Intuimos que corresponden a un genoma diploide ya que en la carpeta de asm1 donde tenemos los archivos descargados, existen dos archivos hap1 y hap2, que se corresponderian con el haplotipo materno y paterno propio de un organismo diploide.
+
+¿Qué nivel de eliminación de duplicaciones hemos aplicado? (El paso de eliminar duplicaciones sirve para que las zonas de alta heterocigosidad no sean ensambladas como contigs diferentes).
+
+Purge-dups:
+    -l INT       purge level. 0: no purging; 1: light; 2/3: aggressive [0 for trio; 3 for unzip]
+
+El nivel por tanto es agresivo, con un valor de 3.
+
+Si tuvieramos lecturas ultra-largas, ¿con qué opción o argumento añadiríamos esa información?
+
+Añadiríamos el argumento --ul y el nombre del file, dentro de ultra-long integration
+
+## Evaluación del resultado
+# Ejercicio 3
+
+Consulta la descripción de los archivos de salida que encontrarás en este enlace y contesta las preguntas siguientes:
+
+¿Dónde están las secuencias que componen el ensamblaje?
+
+Estarían en el archivo descargado en ams1 con el nombre: `prefix`.r_utg.gfa: gráfico de unidad en bruto resuelto con haplotipo. Este gráfico conserva toda la información de haplotipo.
+
+En los archivos .gfa, ¿qué son las líneas que empiezan por ‘A’?
+Los archivos que empiezan por A indican aquellos que incluyen la información de lecturas que se utilizan para construir cóntigo/unidad. Son además la primera columna.
+
+¿Qué información tiene los archivos .bed?
+Las coordenadas de las regiones de baja calidad están escritas para *lowQ.bed, en formato de cama.
+
+¿Cuál es la cobertura media estimada de las secuencias homocigotas?
+En hifiasm.log tenemos unos histogramas que se corresponden con el perfil de cámeros. El numero de repeticiones mas frecuentes es 12, y por tantoo ese 12 podriamos tomarlo como la cobertura media. De hecho, se parece bastante al 13 que esperabamos bajo la suposicion de quue el genoma sea de unas 19000000 bases. EL pico va disminuyendo, se reduce muchisimo tras la correccion de errores.
+Como es un organismo diploide, deberia haber otro pico igual en 6, pero no lo hay porque es una planta y es homocigota (por autofertilizacion)
+
+¿Y la de las heterocigotas?
+En este caso, dado que no hay un segundo pico, nuestra planta es homocigota.
+
+```{bash}
+awk '(/^S/){print ">" $2 "\n" $3}' asm1/At4.bp.p_ctg.gfa > asm1/At4.fa
+```
+
+
