@@ -1,0 +1,106 @@
+---
+title: "guion_practica11"
+format: html
+---
+
+# Programas
+
+Los programas que no utilizaremos (porque no están instalados y son difíciles de instalar son RepeatModeler (Flynn et al. 2020), RepeatMasker, y GALBA (Bruna et al. 2023). Cada uno de ellos, a su vez, utiliza otros.
+
+## RepeatModeler
+
+Utiliza como input sólo el ensamblaje, para identificar los elementos repetitivos que pueda haber. Genera, entre otras cosas, un archivo FASTA con las secuencias consenso de las familias de elementos transponibles identificadas. Este archivo FASTA se puede usar después para enmascarar el genoma.
+
+## RepetaMasker
+
+Su propósito es enmascarar del ensamblaje todas las instancias de elementos repetitivos que pueda identificar. Utiliza una librería de elementos repetitivos previamente conocidos. Existen bases de datos, como Dfam, que pueden usarse cuando queremos enmascarar el ensamblaje de un organismo parecido a aquellos de los que ya conocemos muchos elementos repetitivos. También podemos usar el archivo FASTA generado por RepeatModeler de novo.
+
+## GALBA
+
+Utiliza miniprot (Li 2023) para alinear las proteínas al ensamblaje i encontrar genes homólogos a los que las condifican. A partir de estos resultados, entrena a Augustus para definir mejor los bordes de los genes y posiblemente encontrar otros genes adicionales. No es el programa más preciso, pero es relativamente sencillo de usar.
+
+# Resultados
+
+## Ejercicio 1
+
+Sabiendo que una forma de hacerlo es la siguiente, incluye la orden en un bloque de Bash de tu documento de Quarto de tal manera que el archivo de entrada esté en tu carpeta data y el de salida en la misma carpeta de trabajo de la práctica actual, y además, que sólo se ejecute si el archivo de salida proteinas.fasta no existe.
+
+```{bash}
+if [ ! -e proteinas.fasta ]; then 
+cat ../2026-04-21/uniprotkb_proteome_UP000006548_AND_prot_2026_04_21.fasta | awk '(/^>/){split($1, A, /\|/); print ">" A[2]}(/^[^>]/){print $0}'
+fi
+```
+
+Para que nos cree el archivo:
+
+```{bash}
+if [ ! -e proteinas.fasta ]; then 
+awk '(/^>/){split($1, A, /\|/); print ">" A[2]}(/^[^>]/){print $0}' ../2026-04-21/uniprotkb_proteome_UP000006548_AND_prot_2026_04_21.fasta > proteinas.fasta
+fi
+```
+
+# Análiis de los resultados de RepeatModeler
+
+##Ejercicio 2
+
+Explora los resultados de RepeatModeler y trata de contestar las preguntas siguientes.
+
+¿Cuántas familias de elementos transponibles se han encontrado?
+
+```{bash}
+grep -c "^>" RepeatModelerResults/At4-families.fa
+```
+
+¿Cuánto duró la ejecución del programa? Desde el archivo dentro de la carpeta descomprimida de RepeatModelerResults, run.log, hay una linea donde indica el program time: 01:02:16 (hh:mm:ss)
+
+¿Cuál dirías que es el archivo de salida más importante? Diría que el archivo mas importante es el At4-families.fa a nivel funcional para poder visualizar, llevar a cabo la anotación y dar un resultado.
+
+# Suavizar la mascara
+
+## Ejercicio 3
+
+Instala el programa bedtools siguiendo las instrucciones oportunas para tu sistema en la página oficial Utiliza el ensamblaje original como archivo FASTA de entrada y el archivo GFF que ha producido RepetaMasker como coordenadas de las regiones a enmascarar. Lee el manual de bedtools maskfasta en este enlace y genera el ensamblaje con máscara suave llamado At4.soft.fa.
+
+(base) logonga2\@U64Gen03:\~\$ cd bin (base) logonga2\@U64Gen03:\~/bin\$ mv bedtools.static bedtools (base) logonga2\@U64Gen03:\~/bin\$ ls bedtools dataformat datasets hifiasm (base) logonga2\@U64Gen03:\~/bin\$ chmod u+x bedtools (base) logonga2\@U64Gen03:\~/bin\$ ls bedtools dataformat datasets hifiasm
+
+```{bash}
+~/bin/bedtools maskfasta -fi ../2026-04-16/asm1/At4.fa -bed RepeatMaskerResults/RM01/At4.fa.out.gff -fo At4.soft.fa
+```
+
+# GALBA
+
+Para ejecutar GALBA ha sido necesario crear algunas variables de entorno que indican donde puede GALBA encontrar un par de ejecutables más. Para facilitar la reproducibilidad, este tipo de definiciones deben aparecer al principio del bloque, donde son más visibles, para que sean fácilmente modificadas cuando las órdenes vayan a ejecutarse en otro ordenador.
+
+## Ejercicio 4
+
+Incluye en tu documento de Quarto un bloque de código (pero no ejecutable, con la opción eval: false) como el anterior, donde los caminos TSERBA y a MINIPROTHINT se correspondan con tu propia carpeta bin, aunque no los tengas instalados.
+
+```{bash}
+eval: false
+export TSEBRA_PATH=/home/logonga2/bin/TSEBRA/bin/
+export MINIPROTHINT_PATH=/home/logonga2/bin/miniprothint/
+
+galba.pl --species="Arabidopsis thaliana" \
+         --genome=At4.soft.fa \
+         --prot_seq=proteinas.fasta
+```
+
+Estamos utilizando el Miniprot, mapea las secuencia contra el ensamblaje; y el Augustus que es el programa entrenado para identificar bien los genes, refinando el resto con varias rondas.
+
+## Ejercicio 5
+
+Échales un vistazo a los archivos de salida de GALBA y trata de sacar algo en claro. Cuando entramos en la carpeta inicial de archivos de GALBA, hay un archivo prot_seq_all.fa correspondiente a todas las proteina predichas a partir del genoma anotado.
+
+Correción conjunta: Modeler: Los archivos At4 terminados en .nhr, .nin, .njs, se tratan de una base de datos de BLAST para poder buscar cosas parecidas y que se repiten entre ellas rapidamente, de manera que convierte el ensamblaje en una base de datos de BLAST.
+
+El stk son los alineamientos (en un formato antiguo que se llama estocolmo), y en el families.fa son las secuencias consenso de cada familia. LTR Gipsy hace referencia a la clase de elemento transponible del que se trata dentro del archivo que nos ha sacado de proteinas.fasta
+
+Podemos añadir graficas de la distribucion de tamaños de las familias de diferentes tipos. El modeler se ejecuta cuando se hace ensamblaje de una especie totalmente desconocida. Sino, podriamos haber aplicado el Masker directamente con una base de datos que ya existe de los elementos transponibles de Arabidopsis Thaliana.
+
+Masker: No se ha conseguido que el enmascaramiento fuera suave; en el masked es un enmascaramiento duro. Las N son la regiones identificadas como elementos transponibles, de hecho detecta elementos encajados en otros, incluso fragmentados. Al ejecutarlo, una opcion era pedirle que generara el formato de salida gff (sinonimo de gtf), el que luego hemos utilizado para convertir esas N enn minusuculas. Es un archivo que nos da las coordenadas de cada instancia de elemento transponible. Una vez tenemos el ensamblaje enmascarado de forma suave, podemos ejecutar GALBA, es un lenguaje de script de pl
+
+GALBA: Hay varios scripts de pl que todavia se usan. Hay otros programas que lo hacen mejor, Breaker por ejemplo. Para esto es muy posible que exista dentro de poco una IA que lo haga mejor que estos programas. Le decimos la especie que ha tenido que utilizar para entrenar a Augustus, luego el genoma y luego las evidencias. GALBA no funcionaria bien si le dieramos todas las proteinas conocidas, pero funciona si le damos algun genoma de especies muy cercanas. GALBA devuelve en log todo el historial y genera el conjunto de genes para entrenar a Augustus, que despues refinara la prediccion. Existe la posibilidad de utilizar augustus entrenado en otra especie, pero no es lo optimo, lo mejor es con datos de esa misma especie. El resultado mas importante es el archivo galba.gtf (podemos mirarlo en bash con less): nos dice el contigo en el que ha identificado algo, quien lo ha identificado (augustus), donde empieza y donde termina, luego nos da una puntuacion, la cadena (directa o inversa) donde lo ha encontrado y finalmente algo de informacion sobre si es un exon, un intron, a que gen pertenece... Da una prediccion muy exacta de donde empieza la codificacion, los exones, los intrones, y es una informacion fundamental.
+
+## Ejercicio 6
+
+Si quieres, puedes intentar instalar GALBA en tu ordenador, tomando nota de las dificultades con las que te encuentras.
