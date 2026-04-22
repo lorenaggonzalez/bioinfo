@@ -1,0 +1,243 @@
+---
+title: "Práctica 2. Mapeo de secuencias cortas"
+lang: es
+date: today
+execute: 
+  output: true
+  error: true
+engine: knitr
+
+language:
+   title-block-published: "Última actualización:"
+   section-title-references: "Bibliografía"
+format:
+   html:
+      embed-resources: true
+bibliography: "../../doc/references.bib"     
+---
+
+# Preparación
+Usamos comando git clone para copiar el enlace HTTPS y regenerar nuestro git hub en el ordenador virtual
+Tenemos que darle el path al programa a través del comando ondulación barra. Para la manipulación y descarga lo más recomendable es desde el terminal, no desde R studio. Además, el resto que hagamos queremos que se establezca el guión de prácticas como working directory.
+Usaremos los programas siguientes:
+
+- [fastp](https://github.com/OpenGene/fastp) [@Chen2018]. Si descargas el
+  ejecutable en la carpeta actual, debes concederte el permiso de ejecución:
+  `chmod u+x fastp`. Y además tendrás que invocarlo como `./fastp` para que
+  Bash lo encuentre. Alternativamente, puedes copiarlo a una carpeta en tu
+  `PATH`. Puedes consultar el `PATH` mediante `echo $PATH`.
+- [bwa](https://github.com/lh3/bwa) [@Li2009]. Puedes descargar el código fuente
+  con y compilarlo siguiendo estos pasos:
+  ```
+  git clone https://github.com/lh3/bwa.git
+  cd bwa
+  make
+  ```
+  Puedes copiar el ejecutable a cualquier carpeta en tu `PATH` o bien, invocarlo
+  con su dirección completa cada vez que quieras ejecutarlo.
+- [samtools](https://www.htslib.org/), junto con `htslib` y `bcftools` [@Danecek2021].
+  Los tres programas pueden descargarse del mismo enlace, donde hay instrucciones
+  para instalar la versión más reciente. Para algunos sistemas operativos existen
+  paquetes propios, que pueden instalarse así: `apt install samtools`.
+- [freebayes](https://github.com/freebayes/freebayes/releases) [@Garrison2012].
+
+# Objetivos
+1. Control de calidad de lecturas cortas.
+2. Mapeo de lecturas cortas a un genoma de referencia.
+3. Identificación de variantes.
+
+# Datos
+A continuación descargamos un par de archivos FASTQ de la base de datos
+[ENA](https://www.ebi.ac.uk/ena/browser/home). Han sido seleccionados porque
+su tamaño (comprimidos) no supera los 100 MB. Son secuencias de la cepa Tsu4-125
+de *Bradyrhizobium japonicum* (bacteria simbionte de la planta de soja). Proceden
+de la [Universidad de Tohoku](https://www.tohoku.ac.jp/en/) y forman parte de un
+[proyecto](https://www.ebi.ac.uk/ena/browser/view/PRJDB3261) en el que se
+secuenciaron 16 cepas más de *Bradyrhizobium*.
+
+```{bash}
+if [ ! -e DRR025089_1.fastq.gz ]; then
+   # Con la opción "-o /dev/null" nos deshacemos de los mensajes.
+   wget -o /dev/null \
+        ftp://ftp.sra.ebi.ac.uk/vol1/fastq/DRR025/DRR025089/DRR025089_1.fastq.gz
+fi
+if [ ! -e DRR025089_2.fastq.gz ]; then
+   wget -o /dev/null \
+        ftp://ftp.sra.ebi.ac.uk/vol1/fastq/DRR025/DRR025089/DRR025089_2.fastq.gz
+fi
+```
+
+:::{.callout-note icon=false}
+## Desafío
+Son archivos que no son cómodos, están muy comprimidos
+En el paginador me muestra el contenido de los archivos poco a poco. Formato FASTQ, para cada lectura hay una linea con el nombre de la lectura, la secuencia con algunas N, y una linea vacía, y las calidades. Las N se corresponden con calidades bajas como cabría esperar
+Comando que podemos usar en el terminal para contar las líneas: wc -l del archivo comprimido. Hemos de descomprimirlo con el programa gunzip -c ; despues de escribir el nombre y un espacio, le doy una barra vertical, de manera que el resultado de esa orden la estoy encaminando hacia otro sitio, lo redirijo al programa wc que me cuenta las líneas. El concepto se le llama tuberías, existen maneras de utilizarlas tambien estas tuberias en R para ir pasando se un programa a otro. Evita tener que guardar otro archivo descomprimido
+Para volver a comprimir: gzip
+Con gunzip -c lo descomprime y lo muestra, pero después no se guarda y asi no ocupamos ese espacio
+Una vez descargados los archivos FASTQ, échales un vistazo desde la línea
+de órdenes. Puedes hacerlo con `zless`, una versión de `less` capaz de mostrar
+archivos comprimidos, o bien descomprimiendo los archvios con `gunzip`. Para no
+ocupar espacio de disco innecesariamente, puedes usar
+`gunzip -c DRR025089_1.fastq.gz | less -S`, que envía el contenido del archivo
+a la salida estándar (no a un archivo nuevo), de donde `less -S` lo lee, sin
+modificar nada en la carpeta. ¿Sabrías contar el número de líneas de cada archivo?
+:::
+
+Necesitaremos también el genoma de referencia de `Bradyrhizobium japonicum`.
+Usaremos el de la cepa ACCC 15027 (hay otros).
+
+```{bash}
+# Con la opción "-o /dev/null" nos deshacemos de los mensajes,
+# y con "-O referencia.fa" escogemos un nombre adecuado para el archivo.
+if [ ! -e referencia.fa ]; then
+   wget -o /dev/null -O referencia.fa \
+        https://www.ebi.ac.uk/ena/browser/api/fasta/GCA_042137995.2 
+fi
+```
+wget es un programa de descargas que nos va dando mensajes sobre como van esas descargas y si tiene problemas, como no queremos ocupar espacio con esos mensajes, los eliminamos. Esto no es importante que lo ejecutemos ahora mismo
+Formato FASTA, el primer simbolo es >: en el terminal de bash hay un programa grep, regular expression, con el que se puede interrogar un archivo y pedir que solo muestre las lineas de ese archivo en las que coincida la expresion regular que le vamos a dar. Por ej grep ">" referencia.fa
+Nos da 3 lineas, una que lleva el nombre del cromosoma y otras de plasmid pA y pB
+:::
+Si le decimos grep ">" archive, nos identificara todas las lineas que tengan este simbolo, pero si queremos que tengan el simbolo solo al principio de la linea, se pone grep "^>" archivo
+LO que vemos es que tenemos 3 líneas en este caso
+:::{.callout-note icon=false}
+
+## Preguntas
+- ¿Crees que deberíamos guardar los archivos descargados en `../../data`?
+
+No se debería dejar que los archivos descargados se guarden directamente en "data" debido a que se mezclarían datos originales con datos ya procesados, perdiéndose la noción de cuál es el archivo original y por tanto fallaría la reproducibilidad de este análisis de alineamientos desde cero. Además, se pueden generar archivos muy grandes y pesados que superen los límites de tamaño para subirlos al repositorio y por tanto ello dificulte la colaboración. Por último, si se guardan manualmente en data todos los archivos descargados, no queda claro su origen, pero tampoco queda registrada la versión de FAST, ni tampoco el historial de modificaciones.
+
+- ¿Cómo podrías guardar los mensajes de `wget` en un archivo?
+
+Existe una función propia de wget que permite introducir un comando en el terminal Bash de "-o descarga.log", de manera que los mensajes se guardarán en "descarga.log"
+
+- ¿De cuántas secuencias diferentes se compone este genoma de referencia?
+3 secuencias diferentes
+
+# Control de calidad
+
+```{bash}
+if [ ! -e fastp.html ]; then
+   # Si "fastp" está en la carpeta actual y  no en el PATH, escribe "./fastp"
+   # en lugar de "fastp".
+   fastp -i DRR025089_1.fastq.gz \
+         -o DRR025089_1_clean.fastq \
+         -I DRR025089_2.fastq.gz \
+         -O DRR025089_2_clean.fastq \
+         --merge \
+         --merged_out DRR025089_m_clean.fastq
+fi
+```
+
+:::{.callout-note icon=false}
+## Ejercicios
+1. Revisa la ayuda del programa ejecutando `fastp -h`, y asegúrate de entender al menos las opciones que hemos usado.
+2. Revisa el informe generado por `fastp` en el archivo `fastp.html` y redacta un pequeño resumen de las principales conclusiones que sacas.
+
+Este informe especifica las características del filtrado de calidad realizado por el programa fastp, analizando los datos reportados antes y después del filtrado. Lo que se interpreta es que con el proceso de filtrado mejoró mucho la calidad, ya que tanto en Q20 como Q30 hay un aumento del valor. A su vez también se observa una reducción del número de lecturas finales debido a que hayan perdido su pareja o se hayan corregido (1/4 de las lecturas parece que han sido corregidas). En cuanto a los adaptadores el porcentaje es muy bajo por lo que no habría mucha contaminación por su parte, y en cuanto a las duplicaciones, no parece haber un problema de amplificación excesiva ya que hay un porcentaje muy alto de lecturas que aparecen una sola vez. Por otro lado, el tamaño del inserto es de 205 pb, un tamaño más o menos estándar y su distribución también es bastante normal.
+Una observación que llama la atención es que la calidad de las posiciones en la lectura va disminuyendo progresivamente hacia las posiciones finales, pero esto es algo típico de Illumina. Sin embargo, el contenido en GC se mantiene bastante constante y a un valor más o menos alto.
+Con todo esto, en general la calidad es buena y la librería parece bien construida, habiendo mejorado bastante el proceso de filtrado, la calidad de la lectura.
+
+3. Descarga un segundo conjunto de archivos FASTQ de la misma especie y repite el análisis de calidad con ellos. Puedes ver algunas opciones en [este enlace](https://www.ebi.ac.uk/ena/browser/advanced-search?result=read_run&query=study_accession%3D%22PRJDB3261%22&fields=run_accession%2Cexperiment_title%2Cstudy_accession%2Cfastq_bytes%2Cfastq_ftp%2Cscientific_name%2Cfirst_public&excludeAccessionType=run&excludeAccessions=DRR025089).
+   Es mejor no descargar archivos demasiado grandes.
+:::
+
+# Mapeo
+El objetivo de esta sección es alinear las lecturas cortas al genoma de
+referencia, mediante el programa `bwa`. El archivo final será un archivo BAM
+*ordenado*. Para obtener ese archivo es necesario generar algunos archivos
+auxiliares: primero, el índice del genoma de referencia, después los alineamientos
+en formato SAM (no comprimidos) y finalmente un archivo BAM, que es la versión
+comprimida del SAM (todavía no ordenado). La jerarquía de condiciones de ejecución
+siguiente permitirá borrar los archivos auxiliares, para ahorrar espacio, y no tener
+que generarlos de nuevo cada vez que compilemos este documento si el archivo final
+ya está presente en la carpeta de trabajo.
+
+```{bash}
+if [ ! -e DRR025089.bam ]; then
+   if [ ! -e DRR025089_unsorted.bam ]; then
+      if [ ! -e DRR025089.sam ]; then
+         if [ ! -e referencia.fa.bwt ]; then
+            bwa index referencia.fa
+         fi
+         bwa mem -M -R '@RG\tID:DRR025089\tSM:SAMD00022947' \
+                 -o DRR025089.sam \
+                 referencia.fa \
+                 DRR025089_1_clean.fastq \
+                 DRR025089_2_clean.fastq \
+         1> bwa.log 2> bwa.err
+      fi
+      samtools view -b -o DRR025089_unsorted.bam DRR025089.sam
+    fi
+    samtools sort -o DRR025089.bam DRR025089_unsorted.bam
+    samtools index DRR025089.bam
+fi
+```
+
+:::{.callout-note icon=false}
+## Desafíos
+1. Entre las órdenes anteriores, añade la descarga del genoma de referencia
+   en el lugar adecuado y bajo la condición adecuada para que pueda borrarse
+   una vez se haya generado el alineamiento.
+2. En un bloque de órdenes nuevo, alinea también los pares de lecturas cortas
+   que `fastp` había combinado (`DR025089_m_clean.fastq`).
+3. Lee la lista de funciones que te ofrece `samtools` al ejecutarlo sin ningún
+   argumento. ¿Qué función usarías para combinar dos archvivos BAM en uno?
+3. ¿Cuánto espacio de disco ocupan los archivos FASTQ, el genoma de referencia y
+   su índice y el archivo SAM?
+4. Podíamos haber ahorrado algún paso aprovechando las *tuberías* de BASH:
+
+```
+bwa mem -M -R '@RG\tID:DRR025089\tSM:SAMD00022947' \
+        referencia.fa DRR025089_1_clean.fastq DRR025089_2_clean.fastq | \
+samtools view -u - | \
+samtools sort - > DRR025089.bam
+```
+
+  Este estilo tiene también la ventaja de ser más rápido. ¿Crees que hay algún
+  inconveniente al usar las tuberías?
+:::
+
+Antes de proseguir, es importante comprobar el resultado del paso anterior.
+Podemos extraer algunas estadísticas del archivo BAM así:
+
+```{bash}
+if [ ! -e DRR025089.stats.txt ]; then
+   samtools stats DRR025089.bam > DRR025089.stats.txt
+fi
+
+# Extraemos la sección sobre profundidad de cobertura
+if [ ! -e stat.$i.txt ]; then
+   grep ^COV DRR025089.stats.txt | cut -f 2- > COV.txt
+fi
+```
+
+Ahora podemos importar los datos de cobertura a una sesión de R y representarlos
+gráficamente:
+
+```{r}
+COV <- read.table('COV.txt',
+                  col.names = c('intervalo', 'cobertura', 'bases'))
+plot(COV$cobertura, COV$bases, type = 'l')
+```
+
+:::{.callout-note icon=false}
+## Desafíos
+1. La distribución de cobertura tiene una cola larga. ¿Puedes centrar la
+   representación gráfica entre 0 y 20? Pista: usa la opción `xlim` de `plot()`.
+2. ¿Qué otras estadísticas crees que vale la pena revisar?
+3. El genoma de referencia incluye dos plásmidos. ¿La cepa secuenciada los tiene?
+4. Visualiza los alineamientos en el terminal con la orden siguiente:
+```
+samtools tview DRR025089.bam referencia.fa
+```
+:::
+
+# Identificación de variantes
+
+```{bash}
+if [ ! -e DRR025089.vcf ]; then
+   freebayes -p 1 -f referencia.fa DRR025089.bam > DRR025089.vcf
+fi
+```
+
